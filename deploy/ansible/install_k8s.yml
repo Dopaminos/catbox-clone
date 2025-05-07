@@ -1,0 +1,13 @@
+- name: Install kubectl
+  hosts: all
+  become: yes
+  tasks:
+    - name: Get latest kubectl version
+      shell: curl -L -s https://dl.k8s.io/release/stable.txt
+      register: kubectl_version
+
+    - name: Download kubectl
+      get_url:
+        url: "https://dl.k8s.io/release/{{ kubectl_version.stdout }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: '0755'

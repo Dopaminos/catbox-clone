@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catbox-clone
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catbox-clone
+  template:
+    metadata:
+      labels:
+        app: catbox-clone
+    spec:
+      containers:
+        - name: catbox-clone
+          image: catbox-clone:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/uploads
+      volumes:
+        - name: uploads
+          emptyDir: {}

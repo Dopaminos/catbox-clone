@@ -1,0 +1,17 @@
+- name: Install Docker
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+        state: present
+
+    - name: Install Docker
+      apt:
+        name: docker-ce
+        state: present

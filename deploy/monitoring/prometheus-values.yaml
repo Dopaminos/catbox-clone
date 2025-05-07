@@ -1,0 +1,23 @@
+server:
+  service:
+    type: ClusterIP
+    port: 9090
+    targetPort: 9090
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: prometheus
+prometheusSpec:
+  serviceMonitorSelector:
+    matchLabels:
+      release: prometheus
+  podMonitorSelector:
+    matchLabels:
+      release: prometheus
