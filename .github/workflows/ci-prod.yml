@@ -38,8 +38,8 @@ jobs:
       - name: Set up Kind
         uses: helm/kind-action@v1.10.0
         with:
-          clusterName: catbox-cluster-prod
-          config: kind-config.yaml
+          cluster_name: catbox-cluster-prod
+          config: kind-cluster.yaml
       - name: Load Docker image to Kind
         run: kind load docker-image catbox-clone:prod --name catbox-cluster-prod
       - name: Run Ansible playbook
