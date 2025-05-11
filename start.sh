@@ -4,7 +4,7 @@ set -e
 
 # Check critical files
 echo "Checking critical files..."
-for file in deploy/k8s/kind-config.yaml deploy/k8s/catbox-deployment.yaml deploy/k8s/catbox-service.yaml services/catbox-clone/Dockerfile services/catbox-clone/main.go; do
+for file in deploy/k8s/kind-config.yaml deploy/k8s/catbox-deployment.yaml deploy/k8s/catbox-service.yaml services/catbox-clone/Dockerfile services/catbox-clone/main.go deploy/grafana/dashboards/k8s-dashboard.json; do
     if [ ! -f "$file" ]; then
         echo "Error: $file is missing"
         exit 1
@@ -25,6 +25,31 @@ fi
 kind create cluster --name dev-cluster --config deploy/k8s/kind-config.yaml
 kubectl wait --for=condition=Ready nodes --all --timeout=60s || { echo "Cluster not ready"; exit 1; }
 
+# Verify three nodes
+echo "Verifying node count..."
+NODE_COUNT=$(kubectl get nodes --no-headers | wc -l)
+if [ "$NODE_COUNT" -ne 3 ]; then
+    echo "Error: Expected 3 nodes, found $NODE_COUNT"
+    exit 1
+fi
+
+# Label worker nodes for Ingress
+echo "Labeling worker nodes for Ingress..."
+kubectl label nodes dev-cluster-worker ingress-ready=true --overwrite
+kubectl label nodes dev-cluster-worker2 ingress-ready=true --overwrite
+
+# Remove taints from all nodes
+echo "Removing taints from nodes..."
+kubectl taint nodes dev-cluster-control-plane node-role.kubernetes.io/control-plane:NoSchedule- || true
+kubectl taint nodes dev-cluster-control-plane node-role.kubernetes.io/master:NoSchedule- || true
+kubectl taint nodes dev-cluster-worker node.kubernetes.io/not-ready:NoExecute- || true
+kubectl taint nodes dev-cluster-worker2 node.kubernetes.io/not-ready:NoExecute- || true
+
+# Debug node labels and taints
+echo "Node labels and taints:"
+kubectl get nodes -o wide --show-labels
+kubectl describe nodes | grep -i taint
+
 # Build and load catbox-clone Docker image
 echo "Building and loading catbox-clone..."
 docker build -t catbox-clone:dev -f services/catbox-clone/Dockerfile services/catbox-clone/ || { echo "Docker build failed"; exit 1; }
@@ -33,7 +58,7 @@ kind load docker-image catbox-clone:dev --name dev-cluster
 # Deploy NGINX Ingress Controller
 echo "Deploying NGINX Ingress..."
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/kind/deploy.yaml
-kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s || { echo "Ingress not ready"; exit 1; }
+kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s || { echo "Ingress not ready"; exit 1; }
 
 # Install Prometheus and Grafana
 echo "Installing Prometheus and Grafana..."
@@ -41,7 +66,59 @@ helm repo add prometheus-community https://prometheus-community.github.io/helm-c
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo update
 helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring --create-namespace || { echo "Prometheus failed"; exit 1; }
-helm install grafana grafana/grafana -n monitoring || { echo "Grafana failed"; exit 1; }
+helm install grafana grafana/grafana -n monitoring --set adminPassword=admin || { echo "Grafana failed"; exit 1; }
+
+# Wait for Grafana and Prometheus to be ready
+echo "Waiting for Grafana and Prometheus to be ready..."
+kubectl wait --namespace monitoring --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=90s || { echo "Grafana not ready"; exit 1; }
+kubectl wait --namespace monitoring --for=condition=ready pod -l app.kubernetes.io/name=prometheus --timeout=90s || { echo "Prometheus not ready"; exit 1; }
+
+# Get Prometheus service cluster IP
+echo "Retrieving Prometheus service IP..."
+PROMETHEUS_IP=$(kubectl get svc -n monitoring prometheus-kube-prometheus-prometheus -o jsonpath='{.spec.clusterIP}')
+if [ -z "$PROMETHEUS_IP" ]; then
+    echo "Error: Could not retrieve Prometheus IP"
+    exit 1
+fi
+PROMETHEUS_URL="http://${PROMETHEUS_IP}:9090"
+
+# Port-forward Grafana temporarily
+echo "Setting up Grafana port-forward..."
+kubectl port-forward svc/grafana 3000:80 -n monitoring &
+PORT_FORWARD_PID=$!
+sleep 5
+
+# Configure Prometheus data source in Grafana
+echo "Configuring Prometheus data source..."
+GRAFANA_URL="http://localhost:3000"
+GRAFANA_ADMIN_USER="admin"
+GRAFANA_ADMIN_PASSWORD="admin"
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -u "${GRAFANA_ADMIN_USER}:${GRAFANA_ADMIN_PASSWORD}" \
+  --data "{
+    \"name\": \"Prometheus\",
+    \"type\": \"prometheus\",
+    \"url\": \"${PROMETHEUS_URL}\",
+    \"access\": \"proxy\",
+    \"basicAuth\": false
+  }" \
+  ${GRAFANA_URL}/api/datasources || { echo "Failed to configure Prometheus data source"; kill $PORT_FORWARD_PID; exit 1; }
+
+# Auto-import Grafana dashboard
+echo "Importing Grafana dashboard..."
+DASHBOARD_FILE="deploy/grafana/dashboards/k8s-dashboard.json"
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -u "${GRAFANA_ADMIN_USER}:${GRAFANA_ADMIN_PASSWORD}" \
+  --data "{\"dashboard\": $(cat ${DASHBOARD_FILE}), \"overwrite\": true}" \
+  ${GRAFANA_URL}/api/dashboards/db || { echo "Failed to import dashboard"; kill $PORT_FORWARD_PID; exit 1; }
+
+# Stop port-forward
+kill $PORT_FORWARD_PID
+wait $PORT_FORWARD_PID 2>/dev/null || true
 
 # Deploy catbox-clone
 echo "Deploying catbox-clone..."
@@ -66,3 +143,4 @@ spec:
     path: /metrics
 EOF
 
+echo "Setup complete. Access catbox-clone at http://localhost:8080 and Grafana at http://localhost:3000"
