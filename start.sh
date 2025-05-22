@@ -33,22 +33,9 @@ if [ "$NODE_COUNT" -ne 3 ]; then
     exit 1
 fi
 
-# Label worker nodes for Ingress
-echo "Labeling worker nodes for Ingress..."
-kubectl label nodes dev-cluster-worker ingress-ready=true --overwrite
-kubectl label nodes dev-cluster-worker2 ingress-ready=true --overwrite
-
-# Remove taints from all nodes
-echo "Removing taints from nodes..."
+# Allow scheduling on control-plane node
+echo "Removing control-plane taint..."
 kubectl taint nodes dev-cluster-control-plane node-role.kubernetes.io/control-plane:NoSchedule- || true
-kubectl taint nodes dev-cluster-control-plane node-role.kubernetes.io/master:NoSchedule- || true
-kubectl taint nodes dev-cluster-worker node.kubernetes.io/not-ready:NoExecute- || true
-kubectl taint nodes dev-cluster-worker2 node.kubernetes.io/not-ready:NoExecute- || true
-
-# Debug node labels and taints
-echo "Node labels and taints:"
-kubectl get nodes -o wide --show-labels
-kubectl describe nodes | grep -i taint
 
 # Build and load catbox-clone Docker image
 echo "Building and loading catbox-clone..."
@@ -58,7 +45,9 @@ kind load docker-image catbox-clone:dev --name dev-cluster
 # Deploy NGINX Ingress Controller
 echo "Deploying NGINX Ingress..."
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.1/deploy/static/provider/kind/deploy.yaml
-kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s || { echo "Ingress not ready"; exit 1; }
+kubectl label nodes dev-cluster-worker ingress-ready=true
+kubectl label nodes dev-cluster-worker2 ingress-ready=true
+kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s || { echo "Ingress not ready"; exit 1; }
 
 # Install Prometheus and Grafana
 echo "Installing Prometheus and Grafana..."
