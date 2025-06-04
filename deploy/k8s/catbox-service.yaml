@@ -3,12 +3,12 @@ kind: Service
 metadata:
   name: catbox-clone
   namespace: default
+  labels:
+    app: catbox-clone
 spec:
   selector:
     app: catbox-clone
   ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 8080
-    name: http
-  type: ClusterIP
+    - name: http
+      port: 80
+      targetPort: 8080

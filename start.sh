@@ -4,7 +4,7 @@ set -e
 
 # Check critical files
 echo "Checking critical files..."
-for file in deploy/k8s/kind-config.yaml deploy/k8s/catbox-deployment.yaml deploy/k8s/catbox-service.yaml services/catbox-clone/Dockerfile services/catbox-clone/main.go deploy/grafana/dashboards/k8s-dashboard.json; do
+for file in deploy/k8s/kind-config.yaml deploy/k8s/catbox-deployment.yaml deploy/k8s/catbox-service.yaml services/catbox-clone/Dockerfile services/catbox-clone/main.go deploy/grafana/dashboards/catbox-dashboard.json; do
     if [ ! -f "$file" ]; then
         echo "Error: $file is missing"
         exit 1
@@ -57,6 +57,13 @@ helm repo update
 helm install prometheus prometheus-community/kube-prometheus-stack -n monitoring --create-namespace || { echo "Prometheus failed"; exit 1; }
 helm install grafana grafana/grafana -n monitoring --set adminPassword=admin || { echo "Grafana failed"; exit 1; }
 
+# Patch Kubernetes ServiceMonitors
+echo "Patching Kubernetes ServiceMonitors..."
+kubectl patch servicemonitor -n monitoring prometheus-kube-prometheus-kube-controller-manager --type='merge' -p '{"spec":{"endpoints":[{"port":"https-metrics","scheme":"https","tlsConfig":{"insecureSkipVerify":true}}]}}' || true
+kubectl patch servicemonitor -n monitoring prometheus-kube-prometheus-kube-scheduler --type='merge' -p '{"spec":{"endpoints":[{"port":"https-metrics","scheme":"https","tlsConfig":{"insecureSkipVerify":true}}]}}' || true
+kubectl patch servicemonitor -n monitoring prometheus-kube-prometheus-kube-etcd --type='merge' -p '{"spec":{"endpoints":[{"port":"https-metrics","scheme":"https","tlsConfig":{"insecureSkipVerify":true}}]}}' || true
+kubectl delete servicemonitor -n monitoring prometheus-kube-prometheus-kube-proxy || true
+
 # Wait for Grafana and Prometheus to be ready
 echo "Waiting for Grafana and Prometheus to be ready..."
 kubectl wait --namespace monitoring --for=condition=ready pod -l app.kubernetes.io/name=grafana --timeout=90s || { echo "Grafana not ready"; exit 1; }
@@ -97,7 +104,7 @@ curl -X POST \
 
 # Auto-import Grafana dashboard
 echo "Importing Grafana dashboard..."
-DASHBOARD_FILE="deploy/grafana/dashboards/k8s-dashboard.json"
+DASHBOARD_FILE="deploy/grafana/dashboards/catbox-dashboard.json"
 curl -X POST \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
@@ -115,21 +122,44 @@ kubectl apply -f deploy/k8s/catbox-deployment.yaml
 kubectl apply -f deploy/k8s/catbox-service.yaml
 kubectl wait --for=condition=ready pod -l app=catbox-clone --timeout=60s || { echo "catbox-clone not ready"; exit 1; }
 
-# Configure Prometheus ServiceMonitor
+# Configure Prometheus ServiceMonitor in monitoring namespace
 echo "Configuring ServiceMonitor..."
 cat <<EOF | kubectl apply -f -
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: catbox-clone-monitor
-  namespace: default
+  namespace: monitoring
 spec:
+  namespaceSelector:
+    matchNames:
+    - default
   selector:
     matchLabels:
       app: catbox-clone
   endpoints:
   - port: http
     path: /metrics
+    interval: 15s
+    scheme: http
 EOF
+
+# Debug catbox-clone metrics
+echo "Debugging catbox-clone metrics..."
+kubectl port-forward svc/catbox-clone 8080:80 -n default &
+CATBOX_PID=$!
+sleep 5
+curl -s http://localhost:8080/metrics | grep -E 'http_requests_total|catbox_storage_bytes|catbox_network_bytes_sent_total' || { echo "Failed to fetch catbox metrics"; kill $CATBOX_PID; exit 1; }
+kill $CATBOX_PID
+wait $CATBOX_PID 2>/dev/null || true
+
+# Verify Prometheus targets
+echo "Verifying Prometheus targets..."
+kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 -n monitoring &
+PROMETHEUS_PID=$!
+sleep 10
+curl -s http://localhost:9090/api/v1/targets | grep -E '"scrapePool":"monitoring/catbox-clone-monitor/0"' || { echo "catbox-clone target not found"; curl -s http://localhost:9090/api/v1/targets; exit 1; }
+kill $PROMETHEUS_PID
+wait $PROMETHEUS_PID 2>/dev/null || true
 
 echo "Setup complete. Access catbox-clone at http://localhost:8080 and Grafana at http://localhost:3000"
