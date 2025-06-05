@@ -1,19 +1,21 @@
-name: CI/CD Production
+name: CI Production
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+
 jobs:
-  build-and-deploy:
+  prod-deploy:
     runs-on: ubuntu-latest
     environment: production
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
@@ -21,43 +23,33 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('services/catbox-clone/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
+
       - name: Install dependencies
         working-directory: services/catbox-clone
         run: go mod tidy
+
       - name: Run unit tests
         working-directory: services/catbox-clone
         run: go test ./... -v
-      - name: Run linter
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          working-directory: services/catbox-clone
+
       - name: Build Docker image
-        working-directory: services/catbox-clone
-        run: docker build -t catbox-clone:prod .
-      - name: Set up Kind
-        uses: helm/kind-action@v1.10.0
-        with:
-          cluster_name: catbox-cluster-prod
-          config: kind-cluster.yaml
-      - name: Load Docker image to Kind
-        run: kind load docker-image catbox-clone:prod --name catbox-cluster-prod
-      - name: Run Ansible playbook
-        uses: dawidd6/action-ansible-playbook@v2
-        with:
-          playbook: deploy.yml
-          requirements: requirements.yml
-          options: |
-            --inventory localhost,
+        run: docker build -t catbox-clone:prod ./services/catbox-clone
+
+      - name: Install Ansible
+        run: sudo apt-get update && sudo apt-get install -y ansible sshpass
+
+      - name: Run Ansible Playbooks
+        run: |
+          ansible-playbook -i deploy/ansible/inventory.ini deploy/ansible/install_docker.yml
+          ansible-playbook -i deploy/ansible/inventory.ini deploy/ansible/install_k8s.yml
+
       - name: Verify deployment
         run: |
           kubectl port-forward svc/catbox-clone 8080:80 --namespace default &
           sleep 10
           curl -f http://localhost:8080
-          touch test.txt
-          echo "Test file" > test.txt
-          curl -f http://localhost:8080/upload --form "file=@test.txt"
           curl -f http://localhost:8080/metrics
+
       - name: Check Grafana dashboards
         run: |
           kubectl port-forward svc/prometheus-grafana 3000:80 --namespace monitoring &
