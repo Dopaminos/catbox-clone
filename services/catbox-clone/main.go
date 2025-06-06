@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -16,41 +17,40 @@ import (
 
 // Define Prometheus metrics
 var (
-    httpRequestsTotal = prometheus.NewCounterVec(
-        prometheus.CounterOpts{
-            Name: "http_requests_total",
-            Help: "Total number of HTTP requests",
-        },
-        []string{"method", "path", "status"},
-    )
-    httpRequestDuration = prometheus.NewHistogramVec(
-        prometheus.HistogramOpts{
-            Name:    "http_request_duration_seconds",
-            Help:    "Duration of HTTP requests in seconds",
-            Buckets: prometheus.DefBuckets,
-        },
-        []string{"method", "path"},
-    )
-    storageBytes = prometheus.NewGauge(
-        prometheus.GaugeOpts{
-            Name: "catbox_storage_bytes",
-            Help: "Total bytes used in uploads directory",
-        },
-    )
-    networkBytesSent = prometheus.NewCounter(
-        prometheus.CounterOpts{
-            Name: "catbox_network_bytes_sent_total",
-            Help: "Total bytes sent in HTTP responses",
-        },
-    )
-    networkBytesReceived = prometheus.NewCounter(
-        prometheus.CounterOpts{
-            Name: "catbox_network_bytes_received_total",
-            Help: "Total bytes received in HTTP requests",
-        },
-    )
+	httpRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"method", "path", "status"},
+	)
+	httpRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "Duration of HTTP requests in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path"},
+	)
+	storageBytes = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "catbox_storage_bytes",
+			Help: "Total bytes used in uploads directory",
+		},
+	)
+	networkBytesSent = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "catbox_network_bytes_sent_total",
+			Help: "Total bytes sent in HTTP responses",
+		},
+	)
+	networkBytesReceived = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "catbox_network_bytes_received_total",
+			Help: "Total bytes received in HTTP requests",
+		},
+	)
 )
-
 
 // Middleware to track request metrics
 func metricsMiddleware(next http.Handler) http.Handler {
@@ -58,7 +58,7 @@ func metricsMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		if r.Body != nil {
-			body, err := io.ReadAll(r.Body)
+			body, err := ioutil.ReadAll(r.Body)
 			if err == nil {
 				networkBytesReceived.Add(float64(len(body)))
 				r.Body = io.NopCloser(bytes.NewReader(body))
@@ -69,8 +69,8 @@ func metricsMiddleware(next http.Handler) http.Handler {
 		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", rw.statusCode)).Inc()
 		httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
 		networkBytesSent.Add(float64(rw.bytesWritten))
-	}
-)
+	})
+}
 
 // Custom response writer to track bytes sent
 type responseWriter struct {
@@ -91,9 +91,9 @@ func (rw *responseWriter) WriteHeader(statusCode int) {
 }
 
 // Update storage metrics
-func updateStorageMetrics(uploadDir string) {
+func updateStorageMetrics() {
 	totalSize := int64(0)
-	filepath.Walk(uploadDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk("/app/uploads", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -175,12 +175,8 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 // File server handler for uploaded files
 func fileHandler(w http.ResponseWriter, r *http.Request) {
-	uploadDir := os.Getenv("UPLOAD_DIR")
-	if uploadDir == "" {
-		uploadDir = "/app/uploads"
-	}
 	filename := r.URL.Path[len("/files/"):]
-	filePath := filepath.Join(uploadDir, filename)
+	filePath := filepath.Join("/app/uploads", filename)
 	http.ServeFile(w, r, filePath)
 }
 
@@ -188,15 +184,6 @@ func fileHandler(w http.ResponseWriter, r *http.Request) {
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	uploadDir := os.Getenv("UPLOAD_DIR")
-	if uploadDir == "" {
-		uploadDir = "/app/uploads"
-	}
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
 		return
 	}
 
@@ -213,6 +200,11 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "/app/uploads"
+	}
+
 	f, err := os.Create(filepath.Join(uploadDir, handler.Filename))
 	if err != nil {
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
@@ -226,7 +218,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updateStorageMetrics(uploadDir)
+	updateStorageMetrics()
 
 	// Generate file URL (using service ClusterIP or localhost for dev)
 	fileURL := fmt.Sprintf("http://localhost:8080/files/%s", handler.Filename)
@@ -254,15 +246,11 @@ func main() {
 	prometheus.MustRegister(networkBytesSent)
 	prometheus.MustRegister(networkBytesReceived)
 
-	uploadDir := os.Getenv("UPLOAD_DIR")
-	if uploadDir == "" {
-		uploadDir = "/app/uploads"
-	}
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+	if err := os.MkdirAll("/app/uploads", 0755); err != nil {
 		log.Fatalf("Failed to create uploads directory: %v", err)
 	}
 
-	updateStorageMetrics(uploadDir)
+	updateStorageMetrics()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
