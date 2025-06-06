@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
