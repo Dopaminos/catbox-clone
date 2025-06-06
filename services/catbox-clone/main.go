@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -58,7 +57,7 @@ func metricsMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		if r.Body != nil {
-			body, err := ioutil.ReadAll(r.Body)
+			body, err := io.ReadAll(r.Body)
 			if err == nil {
 				networkBytesReceived.Add(float64(len(body)))
 				r.Body = io.NopCloser(bytes.NewReader(body))
@@ -69,8 +68,8 @@ func metricsMiddleware(next http.Handler) http.Handler {
 		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", rw.statusCode)).Inc()
 		httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
 		networkBytesSent.Add(float64(rw.bytesWritten))
-	})
-}
+	}
+)
 
 // Custom response writer to track bytes sent
 type responseWriter struct {
@@ -91,9 +90,9 @@ func (rw *responseWriter) WriteHeader(statusCode int) {
 }
 
 // Update storage metrics
-func updateStorageMetrics() {
+func updateStorageMetrics(uploadDir string) {
 	totalSize := int64(0)
-	filepath.Walk("/app/uploads", func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(uploadDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -175,8 +174,12 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 // File server handler for uploaded files
 func fileHandler(w http.ResponseWriter, r *http.Request) {
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "/app/uploads"
+	}
 	filename := r.URL.Path[len("/files/"):]
-	filePath := filepath.Join("/app/uploads", filename)
+	filePath := filepath.Join(uploadDir, filename)
 	http.ServeFile(w, r, filePath)
 }
 
@@ -184,6 +187,15 @@ func fileHandler(w http.ResponseWriter, r *http.Request) {
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "/app/uploads"
+	}
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
 		return
 	}
 
@@ -200,7 +212,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	f, err := os.Create(filepath.Join("/app/uploads", handler.Filename))
+	f, err := os.Create(filepath.Join(uploadDir, handler.Filename))
 	if err != nil {
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return
@@ -213,7 +225,7 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updateStorageMetrics()
+	updateStorageMetrics(uploadDir)
 
 	// Generate file URL (using service ClusterIP or localhost for dev)
 	fileURL := fmt.Sprintf("http://localhost:8080/files/%s", handler.Filename)
@@ -241,11 +253,15 @@ func main() {
 	prometheus.MustRegister(networkBytesSent)
 	prometheus.MustRegister(networkBytesReceived)
 
-	if err := os.MkdirAll("/app/uploads", 0755); err != nil {
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "/app/uploads"
+	}
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		log.Fatalf("Failed to create uploads directory: %v", err)
 	}
 
-	updateStorageMetrics()
+	updateStorageMetrics(uploadDir)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", rootHandler)
@@ -260,4 +276,3 @@ func main() {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
-// Test comment
