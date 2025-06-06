@@ -16,7 +16,7 @@ import (
 
 func TestUploadHandler(t *testing.T) {
 	uploadDir := t.TempDir()
-	t.Setenv("UPLOAD_DIR", uploadDir) 
+	t.Setenv("UPLOAD_DIR", uploadDir)
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
