@@ -1,4 +1,34 @@
+# dependencies
 node_modules/
-.vscode/
-*.log
 .env
+*.log
+
+# ide/editor
+.vscode/
+.idea/
+
+# os junk
+.DS_Store
+Thumbs.db
+
+# docker & go
+*.out
+*.test
+*.cache
+*.coverprofile
+
+# binaries
+kubectl
+kind
+
+# kind cluster configs
+kind-cluster.yaml
+kind.txt
+filelist.txt
+test.txt
+
+# k8s port-forward artifacts (optional)
+*.pid
+
+# local uploads/testing
+/uploads/

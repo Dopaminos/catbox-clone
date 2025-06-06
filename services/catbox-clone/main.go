@@ -201,7 +201,12 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	f, err := os.Create(filepath.Join("/app/uploads", handler.Filename))
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "/app/uploads"
+	}
+
+	f, err := os.Create(filepath.Join(uploadDir, handler.Filename))
 	if err != nil {
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return

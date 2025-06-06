@@ -1,13 +1,47 @@
-- name: Install kubectl
-  hosts: all
+- hosts: prod
   become: yes
   tasks:
-    - name: Get latest kubectl version
-      shell: curl -L -s https://dl.k8s.io/release/stable.txt
-      register: kubectl_version
+    - name: Install dependencies
+      apt:
+        name: [apt-transport-https, curl, ca-certificates, software-properties-common]
+        state: present
+        update_cache: yes
 
-    - name: Download kubectl
-      get_url:
-        url: "https://dl.k8s.io/release/{{ kubectl_version.stdout }}/bin/linux/amd64/kubectl"
-        dest: /usr/local/bin/kubectl
-        mode: '0755'
+    - name: Add Kubernetes apt repo
+      shell: |
+        curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+        apt-add-repository "deb http://apt.kubernetes.io/ kubernetes-xenial main"
+
+    - name: Install kubelet, kubeadm, kubectl
+      apt:
+        name: [kubelet, kubeadm, kubectl]
+        state: present
+        update_cache: yes
+
+    - name: Disable swap
+      shell: swapoff -a
+
+    - name: Init Kubernetes cluster (only on main node)
+      shell: kubeadm init --pod-network-cidr=10.244.0.0/16
+      when: inventory_hostname == groups['prod'][0]
+
+    - name: Set up kube config for ubuntu
+      become_user: ubuntu
+      shell: |
+        mkdir -p $HOME/.kube
+        sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        sudo chown $(id -u):$(id -g) $HOME/.kube/config
+      when: inventory_hostname == groups['prod'][0]
+
+    - name: Apply Flannel pod network
+      shell: |
+        kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+      when: inventory_hostname == groups['prod'][0]
+
+    - name: Copy manifests
+      copy:
+        src: ../k8s/
+        dest: /tmp/k8s/
+
+    - name: Apply manifests
+      shell: kubectl apply -f /tmp/k8s/

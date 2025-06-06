@@ -1,17 +1,20 @@
-- name: Install Docker
-  hosts: all
+- hosts: prod
   become: yes
   tasks:
-    - name: Install packages
-      apt:
-        name:
-          - apt-transport-https
-          - ca-certificates
-          - curl
-          - software-properties-common
-        state: present
-
     - name: Install Docker
       apt:
-        name: docker-ce
+        name: [docker.io]
         state: present
+        update_cache: yes
+
+    - name: Add user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Enable & start Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
