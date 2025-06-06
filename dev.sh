@@ -37,3 +37,5 @@ echo "[+] waiting for deployments to be ready"
 kubectl wait --for=condition=available deployment/catbox-clone --timeout=90s
 kubectl wait --for=condition=available deployment/prometheus-kube-prometheus-operator -n monitoring --timeout=90s
 kubectl wait --for=condition=available deployment/prometheus-grafana -n monitoring --timeout=90s
+
+echo "ready"
