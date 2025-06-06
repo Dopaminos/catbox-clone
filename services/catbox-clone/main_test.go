@@ -14,9 +14,9 @@ import (
 
 func TestUploadHandler(t *testing.T) {
 	os.RemoveAll("/app") // ensure /app exists fresh
-	err := os.MkdirAll("/app/uploads", 0755)
+	err := os.MkdirAll("/tmp/uploads", 0755)
 	if err != nil {
-		t.Fatalf("failed to create /app/uploads: %v", err)
+		t.Fatalf("failed to create /tmp/uploads: %v", err)
 	}
 	defer os.RemoveAll("/app")
 
