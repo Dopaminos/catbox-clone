@@ -13,8 +13,12 @@ import (
 )
 
 func TestUploadHandler(t *testing.T) {
-	os.MkdirAll("/app/uploads", 0755)
-	defer os.RemoveAll("/app/uploads")
+	os.RemoveAll("/app") // ensure /app exists fresh
+	err := os.MkdirAll("/app/uploads", 0755)
+	if err != nil {
+		t.Fatalf("failed to create /app/uploads: %v", err)
+	}
+	defer os.RemoveAll("/app")
 
 	formData := bytes.NewBufferString("----WebKitFormBoundary123\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\nContent-Type: text/plain\n\ntest\n----WebKitFormBoundary123--")
 	req, err := http.NewRequest("POST", "/upload", formData)
@@ -41,8 +45,7 @@ func TestMetricsHandler(t *testing.T) {
 	prometheus.MustRegister(networkBytesSent)
 	prometheus.MustRegister(networkBytesReceived)
 
-	// manually set metric for test
-	storageBytes.Set(1)
+	storageBytes.Set(123) // trigger metric output
 
 	req, err := http.NewRequest("GET", "/metrics", nil)
 	if err != nil {
