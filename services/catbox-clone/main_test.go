@@ -41,6 +41,9 @@ func TestMetricsHandler(t *testing.T) {
 	prometheus.MustRegister(networkBytesSent)
 	prometheus.MustRegister(networkBytesReceived)
 
+	// manually set metric for test
+	storageBytes.Set(1)
+
 	req, err := http.NewRequest("GET", "/metrics", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +55,7 @@ func TestMetricsHandler(t *testing.T) {
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
-	if !strings.Contains(rr.Body.String(), "http_requests_total") {
+	if !strings.Contains(rr.Body.String(), "catbox_storage_bytes") {
 		t.Errorf("handler returned unexpected body: got %v", rr.Body.String())
 	}
 }
