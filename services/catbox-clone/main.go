@@ -17,41 +17,40 @@ import (
 
 // Define Prometheus metrics
 var (
-    httpRequestsTotal = prometheus.NewCounterVec(
-        prometheus.CounterOpts{
-            Name: "http_requests_total",
-            Help: "Total number of HTTP requests",
-        },
-        []string{"method", "path", "status"},
-    )
-    httpRequestDuration = prometheus.NewHistogramVec(
-        prometheus.HistogramOpts{
-            Name:    "http_request_duration_seconds",
-            Help:    "Duration of HTTP requests in seconds",
-            Buckets: prometheus.DefBuckets,
-        },
-        []string{"method", "path"},
-    )
-    storageBytes = prometheus.NewGauge(
-        prometheus.GaugeOpts{
-            Name: "catbox_storage_bytes",
-            Help: "Total bytes used in uploads directory",
-        },
-    )
-    networkBytesSent = prometheus.NewCounter(
-        prometheus.CounterOpts{
-            Name: "catbox_network_bytes_sent_total",
-            Help: "Total bytes sent in HTTP responses",
-        },
-    )
-    networkBytesReceived = prometheus.NewCounter(
-        prometheus.CounterOpts{
-            Name: "catbox_network_bytes_received_total",
-            Help: "Total bytes received in HTTP requests",
-        },
-    )
+	httpRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"method", "path", "status"},
+	)
+	httpRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "Duration of HTTP requests in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path"},
+	)
+	storageBytes = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "catbox_storage_bytes",
+			Help: "Total bytes used in uploads directory",
+		},
+	)
+	networkBytesSent = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "catbox_network_bytes_sent_total",
+			Help: "Total bytes sent in HTTP responses",
+		},
+	)
+	networkBytesReceived = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "catbox_network_bytes_received_total",
+			Help: "Total bytes received in HTTP requests",
+		},
+	)
 )
-
 
 // Middleware to track request metrics
 func metricsMiddleware(next http.Handler) http.Handler {
@@ -201,7 +200,12 @@ func uploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	f, err := os.Create(filepath.Join("/app/uploads", handler.Filename))
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "/app/uploads"
+	}
+
+	f, err := os.Create(filepath.Join(uploadDir, handler.Filename))
 	if err != nil {
 		http.Error(w, "Failed to save file", http.StatusInternalServerError)
 		return

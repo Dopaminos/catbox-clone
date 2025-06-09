@@ -1,0 +1,19 @@
+# vcs
+.git
+.gitignore
+
+# dev/ci junk
+*.log
+*.sh
+*.md
+test*
+filelist.txt
+.vscode/
+.idea/
+
+# os
+.DS_Store
+Thumbs.db
+
+# uploads / runtime
+uploads/

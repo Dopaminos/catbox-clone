@@ -1,0 +1,57 @@
+name: CI Production
+on:
+  push:
+    branches: [main]
+
+jobs:
+  prod-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('services/catbox-clone/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        working-directory: services/catbox-clone
+        run: go mod tidy
+
+      - name: Run unit tests
+        working-directory: services/catbox-clone
+        run: go test ./... -v
+
+      - name: Build Docker image
+        run: docker build -t catbox-clone:prod ./services/catbox-clone
+
+      - name: Install Ansible
+        run: sudo apt-get update && sudo apt-get install -y ansible sshpass
+
+      - name: Run Ansible Playbooks
+        run: |
+          ansible-playbook -i deploy/ansible/inventory.ini deploy/ansible/install_docker.yml
+          ansible-playbook -i deploy/ansible/inventory.ini deploy/ansible/install_k8s.yml
+
+      - name: Verify deployment
+        run: |
+          kubectl port-forward svc/catbox-clone 8080:80 --namespace default &
+          sleep 10
+          curl -f http://localhost:8080
+          curl -f http://localhost:8080/metrics
+
+      - name: Check Grafana dashboards
+        run: |
+          kubectl port-forward svc/prometheus-grafana 3000:80 --namespace monitoring &
+          sleep 10
+          curl -f http://localhost:3000

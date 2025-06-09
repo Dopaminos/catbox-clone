@@ -15,9 +15,7 @@ serviceMonitor:
   additionalLabels:
     release: prometheus
 prometheusSpec:
-  serviceMonitorSelector:
-    matchLabels:
-      release: prometheus
+  serviceMonitorNamespaceSelector: {}
   podMonitorSelector:
     matchLabels:
       release: prometheus
